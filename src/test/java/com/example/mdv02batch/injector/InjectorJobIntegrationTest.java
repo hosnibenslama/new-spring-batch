@@ -1,0 +1,93 @@
+package com.example.mdv02batch.injector;
+
+import com.example.mdv02batch.injector.dto.BusinessDataLine;
+import com.example.mdv02batch.injector.reader.InjectorBusinessDataLineMapper;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobParametersBuilder;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.test.context.SpringBatchTest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.test.context.SpringBootTest;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+@SpringBatchTest
+@SpringBootTest
+class InjectorJobIntegrationTest {
+
+    @Autowired
+    private JobLauncher jobLauncher;
+
+    @Autowired
+    @Qualifier("injectorJob")
+    private Job injectorJob;
+
+    @TempDir
+    Path tempDir;
+
+    @Test
+    void shouldCompleteSuccessfully() throws Exception {
+        Path outputFile = tempDir.resolve("contracts_output.txt");
+
+        var params = new JobParametersBuilder()
+                .addString("runDate", LocalDateTime.now().toString())
+                .addString("inputFile", "classpath:input/contracts_input.txt")
+                .addString("outputFile", outputFile.toString())
+                .toJobParameters();
+
+        var execution = jobLauncher.run(injectorJob, params);
+
+        assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        assertThat(outputFile).exists();
+    }
+
+    @Test
+    void outputFileShouldContainExactSameLinesAsInput() throws Exception {
+        Path outputFile = tempDir.resolve("contracts_output_ca6.txt");
+
+        var params = new JobParametersBuilder()
+                .addString("runDate", LocalDateTime.now().toString() + "_ac6")
+                .addString("inputFile", "classpath:input/contracts_input.txt")
+                .addString("outputFile", outputFile.toString())
+                .toJobParameters();
+
+        var inputStream = getClass().getClassLoader().getResourceAsStream("input/contracts_input.txt");
+        assertThat(inputStream).isNotNull();
+        List<String> inputLines = new String(inputStream.readAllBytes())
+                .lines()
+                .filter(line -> !line.isBlank())
+                .toList();
+
+        jobLauncher.run(injectorJob, params);
+
+        List<String> outputLines = Files.readAllLines(outputFile)
+                .stream()
+                .filter(line -> !line.isBlank())
+                .toList();
+
+        assertThat(outputLines).containsExactlyElementsOf(inputLines);
+    }
+
+    @Test
+    void mapperShouldParseSemicolonAndIndentation() {
+        InjectorBusinessDataLineMapper mapper = new InjectorBusinessDataLineMapper(";");
+
+        BusinessDataLine line = mapper.mapLine("    ART;ART_001;OM_001;INTERNET_SERVICE;100.00;EUR", 3);
+
+        assertThat(line.lineNumber()).isEqualTo(3);
+        assertThat(line.indentationLevel()).isEqualTo(4);
+        assertThat(line.recordType()).isEqualTo("ART");
+        assertThat(line.fields()).containsExactly("ART", "ART_001", "OM_001", "INTERNET_SERVICE", "100.00", "EUR");
+        assertThat(line.primaryIdentifier()).isEqualTo("ART_001");
+        assertThat(line.rawLine()).isEqualTo("    ART;ART_001;OM_001;INTERNET_SERVICE;100.00;EUR");
+    }
+}

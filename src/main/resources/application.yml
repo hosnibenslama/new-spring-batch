@@ -1,0 +1,23 @@
+spring:
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: always
+  datasource:
+    url: jdbc:h2:mem:batchdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+batch:
+  injector:
+    input-file: classpath:input/contracts_input.txt
+    output-file: /tmp/contracts_output.txt
+    chunk-size: 1000
+    separator: ";"
+
+logging:
+  level:
+    org.springframework.batch: INFO
+    com.example.mdv02batch: DEBUG
