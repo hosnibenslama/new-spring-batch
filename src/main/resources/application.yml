@@ -14,8 +14,12 @@ batch:
   injector:
     input-file: classpath:input/contracts_input.txt
     output-file: /tmp/contracts_output.txt
-    chunk-size: 1000
+    # One item is now a whole CTR block, so the chunk size counts contracts,
+    # not physical lines.
+    chunk-size: 100
     separator: ";"
+    # Record type opening a new block. Every following line belongs to it.
+    root-record-type: "CTR"
 
 logging:
   level:
