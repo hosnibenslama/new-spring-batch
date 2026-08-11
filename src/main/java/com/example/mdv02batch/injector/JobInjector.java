@@ -1,9 +1,15 @@
 package com.example.mdv02batch.injector;
 
+import java.time.Duration;
+
 import com.example.mdv02batch.injector.dto.BusinessDataLine;
-import com.example.mdv02batch.injector.processor.InjectorItemProcessor;
+import com.example.mdv02batch.injector.dto.CtrBlock;
+import com.example.mdv02batch.injector.processor.CtrBlockItemProcessor;
+import com.example.mdv02batch.injector.reader.CtrBlockItemReader;
 import com.example.mdv02batch.injector.reader.InjectorBusinessDataLineMapper;
+import com.example.mdv02batch.injector.writer.CtrBlockLineAggregator;
 import com.example.mdv02batch.injector.writer.InjectorLineAggregator;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.BatchStatus;
@@ -28,8 +34,6 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.transaction.PlatformTransactionManager;
 
-import java.time.Duration;
-
 @Configuration
 public class JobInjector {
 
@@ -41,6 +45,9 @@ public class JobInjector {
     @Value("${batch.injector.separator:;}")
     private String separator;
 
+    @Value("${batch.injector.root-record-type:CTR}")
+    private String rootRecordType;
+
     @Bean
     public Job injectorJob(JobRepository jobRepository, Step injectorStep) {
         return new JobBuilder("injectorJob", jobRepository)
@@ -49,45 +56,69 @@ public class JobInjector {
                 .build();
     }
 
+    /**
+     * The item of the step is a CTR block, no longer a physical line: one chunk
+     * therefore commits a whole number of contracts, never a truncated one.
+     */
     @Bean
     public Step injectorStep(JobRepository jobRepository,
                              PlatformTransactionManager transactionManager,
-                             FlatFileItemReader<BusinessDataLine> injectorReader,
-                             InjectorItemProcessor injectorProcessor,
-                             FlatFileItemWriter<BusinessDataLine> injectorWriter) {
+                             CtrBlockItemReader injectorBlockReader,
+                             CtrBlockItemProcessor injectorProcessor,
+                             FlatFileItemWriter<CtrBlock> injectorWriter) {
         return new StepBuilder("injectorStep", jobRepository)
-                .<BusinessDataLine, BusinessDataLine>chunk(chunkSize, transactionManager)
+                .<CtrBlock, CtrBlock>chunk(chunkSize, transactionManager)
                 .listener(stepExecutionListener())
-                .reader(injectorReader)
+                .reader(injectorBlockReader)
                 .processor(injectorProcessor)
                 .writer(injectorWriter)
                 .build();
     }
 
+    /**
+     * Line-level reader, kept unchanged: it still maps one physical line to one
+     * {@link BusinessDataLine}. It is no longer wired directly into the step but
+     * wrapped by {@link CtrBlockItemReader}.
+     */
     @Bean
     @StepScope
-    public FlatFileItemReader<BusinessDataLine> injectorReader(
+    public FlatFileItemReader<BusinessDataLine> injectorLineReader(
             @Value("#{jobParameters['inputFile'] ?: '${batch.injector.input-file}'}") Resource inputFile) {
-        LOGGER.info("Configuring injectorReader with inputFile={}", inputFile);
+        LOGGER.info("Configuring injectorLineReader with inputFile={}", inputFile);
         return new FlatFileItemReaderBuilder<BusinessDataLine>()
-                .name("injectorReader")
+                .name("injectorLineReader")
                 .resource(inputFile)
                 .encoding("UTF-8")
                 .lineMapper(new InjectorBusinessDataLineMapper(separator))
                 .build();
     }
 
+    /** Groups the lines of the flat file into CTR blocks. */
     @Bean
     @StepScope
-    public FlatFileItemWriter<BusinessDataLine> injectorWriter(
+    public CtrBlockItemReader injectorBlockReader(
+            FlatFileItemReader<BusinessDataLine> injectorLineReader) {
+        LOGGER.info("Configuring injectorBlockReader with rootRecordType={}", rootRecordType);
+        return new CtrBlockItemReader(injectorLineReader, rootRecordType);
+    }
+
+    /**
+     * The aggregator is now block-scoped: {@link CtrBlockLineAggregator} renders
+     * the whole block, delegating each line to {@link InjectorLineAggregator}.
+     */
+    @Bean
+    @StepScope
+    public FlatFileItemWriter<CtrBlock> injectorWriter(
             @Value("#{jobParameters['outputFile'] ?: '${batch.injector.output-file}'}") String outputFile) {
         LOGGER.info("Configuring injectorWriter with outputFile={}", outputFile);
-        return new FlatFileItemWriterBuilder<BusinessDataLine>()
+        return new FlatFileItemWriterBuilder<CtrBlock>()
                 .name("injectorWriter")
                 .resource(new FileSystemResource(outputFile))
                 .encoding("UTF-8")
                 .shouldDeleteIfExists(true)
-                .lineAggregator(new InjectorLineAggregator())
+                .lineSeparator(System.lineSeparator())
+                .lineAggregator(new CtrBlockLineAggregator(
+                        new InjectorLineAggregator(), System.lineSeparator()))
                 .build();
     }
 
@@ -133,11 +164,12 @@ public class JobInjector {
 
             @Override
             public org.springframework.batch.core.ExitStatus afterStep(StepExecution stepExecution) {
-                LOGGER.info("Step {} completed with status {} | readCount={} | writeCount={} | skipCount={}",
+                LOGGER.info("Step {} completed with status {} | blocksRead={} | blocksWritten={} | filterCount={} | skipCount={}",
                         stepExecution.getStepName(),
                         stepExecution.getStatus(),
                         stepExecution.getReadCount(),
                         stepExecution.getWriteCount(),
+                        stepExecution.getFilterCount(),
                         stepExecution.getSkipCount());
                 return stepExecution.getExitStatus();
             }

@@ -1,22 +1,24 @@
 package com.example.mdv02batch.injector;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.util.List;
+
 import com.example.mdv02batch.injector.dto.BusinessDataLine;
 import com.example.mdv02batch.injector.reader.InjectorBusinessDataLineMapper;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobParametersBuilder;
+import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.launch.JobLauncher;
 import org.springframework.batch.test.context.SpringBatchTest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.LocalDateTime;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -36,7 +38,7 @@ class InjectorJobIntegrationTest {
 
     @Test
     void shouldCompleteSuccessfully() throws Exception {
-        Path outputFile = tempDir.resolve("contracts_output.txt");
+        Path outputFile = this.tempDir.resolve("contracts_output.txt");
 
         var params = new JobParametersBuilder()
                 .addString("runDate", LocalDateTime.now().toString())
@@ -44,7 +46,7 @@ class InjectorJobIntegrationTest {
                 .addString("outputFile", outputFile.toString())
                 .toJobParameters();
 
-        var execution = jobLauncher.run(injectorJob, params);
+        var execution = this.jobLauncher.run(this.injectorJob, params);
 
         assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);
         assertThat(outputFile).exists();
@@ -52,22 +54,17 @@ class InjectorJobIntegrationTest {
 
     @Test
     void outputFileShouldContainExactSameLinesAsInput() throws Exception {
-        Path outputFile = tempDir.resolve("contracts_output_ca6.txt");
+        Path outputFile = this.tempDir.resolve("contracts_output_ca6.txt");
 
         var params = new JobParametersBuilder()
-                .addString("runDate", LocalDateTime.now().toString() + "_ac6")
+                .addString("runDate", LocalDateTime.now() + "_ac6")
                 .addString("inputFile", "classpath:input/contracts_input.txt")
                 .addString("outputFile", outputFile.toString())
                 .toJobParameters();
 
-        var inputStream = getClass().getClassLoader().getResourceAsStream("input/contracts_input.txt");
-        assertThat(inputStream).isNotNull();
-        List<String> inputLines = new String(inputStream.readAllBytes())
-                .lines()
-                .filter(line -> !line.isBlank())
-                .toList();
+        List<String> inputLines = readInputLines();
 
-        jobLauncher.run(injectorJob, params);
+        this.jobLauncher.run(this.injectorJob, params);
 
         List<String> outputLines = Files.readAllLines(outputFile)
                 .stream()
@@ -75,6 +72,32 @@ class InjectorJobIntegrationTest {
                 .toList();
 
         assertThat(outputLines).containsExactlyElementsOf(inputLines);
+    }
+
+    /**
+     * The step now counts contract blocks: the read and write counts must match
+     * the number of CTR header lines, not the number of physical lines.
+     */
+    @Test
+    void stepShouldCountBlocksAndNotPhysicalLines() throws Exception {
+        Path outputFile = this.tempDir.resolve("contracts_output_blocks.txt");
+
+        var params = new JobParametersBuilder()
+                .addString("runDate", LocalDateTime.now() + "_blocks")
+                .addString("inputFile", "classpath:input/contracts_input.txt")
+                .addString("outputFile", outputFile.toString())
+                .toJobParameters();
+
+        List<String> inputLines = readInputLines();
+        long expectedBlocks = inputLines.stream().filter(line -> line.startsWith("CTR;")).count();
+
+        var execution = this.jobLauncher.run(this.injectorJob, params);
+        StepExecution stepExecution = execution.getStepExecutions().iterator().next();
+
+        assertThat(expectedBlocks).isGreaterThan(0);
+        assertThat(stepExecution.getReadCount()).isEqualTo(expectedBlocks);
+        assertThat(stepExecution.getWriteCount()).isEqualTo(expectedBlocks);
+        assertThat(stepExecution.getFilterCount()).isZero();
     }
 
     @Test
@@ -89,5 +112,14 @@ class InjectorJobIntegrationTest {
         assertThat(line.fields()).containsExactly("ART", "ART_001", "OM_001", "INTERNET_SERVICE", "100.00", "EUR");
         assertThat(line.primaryIdentifier()).isEqualTo("ART_001");
         assertThat(line.rawLine()).isEqualTo("    ART;ART_001;OM_001;INTERNET_SERVICE;100.00;EUR");
+    }
+
+    private List<String> readInputLines() throws Exception {
+        var inputStream = getClass().getClassLoader().getResourceAsStream("input/contracts_input.txt");
+        assertThat(inputStream).isNotNull();
+        return new String(inputStream.readAllBytes())
+                .lines()
+                .filter(line -> !line.isBlank())
+                .toList();
     }
 }
