@@ -1,0 +1,13 @@
+target/
+*.class
+
+# IDE and Editor files
+.idea/
+.vscode/
+*.iml
+.settings/
+.classpath
+.project
+
+# Log files
+*.log
