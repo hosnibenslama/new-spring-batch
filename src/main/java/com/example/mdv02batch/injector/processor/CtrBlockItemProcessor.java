@@ -1,5 +1,7 @@
 package com.example.mdv02batch.injector.processor;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 import com.example.mdv02batch.injector.dto.CtrBlock;
 
 import org.slf4j.Logger;
@@ -10,18 +12,46 @@ import org.springframework.stereotype.Component;
 /**
  * Block-scoped processor for the injector technical foundation.
  *
- * <p>No transformation is applied yet: the block is forwarded unchanged. This is
- * the extension point where the CTR compliance checks will plug in, returning
- * {@code null} to filter a non-compliant block out of the nominal flow.</p>
+ * <p>Filters out orphan blocks (lines appearing before any CTR header) and
+ * blocks with a missing contract identifier by returning {@code null}.
+ * Returning {@code null} causes Spring Batch to increment
+ * {@code StepExecution.filterCount} and skip the write phase for that block
+ * without counting it as a skip or an error.</p>
+ *
+ * <p>Logs progress every {@value #LOG_INTERVAL} valid contracts at INFO level.
+ * Business compliance checks should be added here and should return
+ * {@code null} or throw a skippable exception for non-compliant blocks.</p>
  */
 @Component
 public class CtrBlockItemProcessor implements ItemProcessor<CtrBlock, CtrBlock> {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CtrBlockItemProcessor.class);
 
+    private static final long LOG_INTERVAL = 10_000L;
+
+    private final AtomicLong counter = new AtomicLong();
+
     @Override
     public CtrBlock process(CtrBlock item) {
-        LOGGER.debug("Processing {}", item.reference());
+        // Spring Batch never passes null; guard is omitted intentionally.
+        if (item.orphan()) {
+            LOGGER.warn("Filtering out orphan block at line {}", item.startLineNumber());
+            return null;
+        }
+
+        // Cache to avoid calling the method twice for the same item.
+        String contractId = item.contractId();
+        if (contractId == null || contractId.isBlank()) {
+            LOGGER.warn("Filtering out block at line {}: missing contract identifier",
+                    item.startLineNumber());
+            return null;
+        }
+
+        long count = counter.incrementAndGet();
+        if (count % LOG_INTERVAL == 0) {
+            LOGGER.info("Processed {} contracts so far", count);
+        }
         return item;
     }
 }
+

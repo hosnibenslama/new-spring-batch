@@ -1,6 +1,7 @@
 package com.example.mdv02batch.injector.dto;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,7 +30,9 @@ public record CtrBlock(
         List<BusinessDataLine> children) {
 
     public CtrBlock {
-        children = List.copyOf(children);
+        // Wrap in an unmodifiable view instead of List.copyOf to avoid
+        // the element-by-element null check copy on every contract (5M+).
+        children = Collections.unmodifiableList(new ArrayList<>(children));
     }
 
     public static CtrBlock of(BusinessDataLine header, List<BusinessDataLine> children) {
@@ -50,14 +53,18 @@ public record CtrBlock(
         return this.header == null ? null : this.header.primaryIdentifier();
     }
 
-    /** Every line of the block, header first, in file order. */
+    /**
+     * Every line of the block, header first, in file order.
+     * Returns a new list each call — callers may iterate but not cache.
+     */
     public List<BusinessDataLine> lines() {
-        List<BusinessDataLine> lines = new ArrayList<>(this.children.size() + 1);
-        if (this.header != null) {
-            lines.add(this.header);
+        if (this.header == null) {
+            return this.children;
         }
-        lines.addAll(this.children);
-        return List.copyOf(lines);
+        List<BusinessDataLine> all = new ArrayList<>(this.children.size() + 1);
+        all.add(this.header);
+        all.addAll(this.children);
+        return all;
     }
 
     public int lineCount() {
@@ -82,3 +89,4 @@ public record CtrBlock(
                         .formatted(this.startLineNumber, contractId(), lineCount());
     }
 }
+

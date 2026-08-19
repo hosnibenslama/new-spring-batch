@@ -1,27 +1,44 @@
 spring:
   batch:
     job:
-      enabled: false
+      enabled: true
     jdbc:
       initialize-schema: always
   datasource:
-    url: jdbc:h2:mem:batchdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
+    url: jdbc:postgresql://localhost:5432/batchdb?reRewriteBatchedInserts=true
+    driver-class-name: org.postgresql.Driver
+    username: postgres
+    password: postgrespassword
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema-contracts.sql
 
 batch:
   injector:
     input-file: classpath:input/contracts_input.txt
-    output-file: /tmp/contracts_output.txt
+    output-file: target/contracts_output.txt
     # One item is now a whole CTR block, so the chunk size counts contracts,
-    # not physical lines.
-    chunk-size: 100
+    # not physical lines. 500 balances commit frequency vs memory for 5M+ records.
+    chunk-size: 500
     separator: ";"
     # Record type opening a new block. Every following line belongs to it.
     root-record-type: "CTR"
+    # Skip limit for fault-tolerant block processing.
+    skip-limit: 50000
+    # Upsert SQL for PostgreSQL. Override per-profile for other databases
+    # (e.g. H2 in tests uses MERGE INTO — see application-test.yml).
+    contract-upsert-sql: >-
+      INSERT INTO contract (contract_id, client_id, start_date, status, line_count)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT (contract_id) DO UPDATE SET
+        client_id   = EXCLUDED.client_id,
+        start_date  = EXCLUDED.start_date,
+        status      = EXCLUDED.status,
+        line_count  = EXCLUDED.line_count
 
 logging:
   level:
     org.springframework.batch: INFO
-    com.example.mdv02batch: DEBUG
+    com.example.mdv02batch: INFO
+

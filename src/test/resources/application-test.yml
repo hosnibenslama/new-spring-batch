@@ -1,0 +1,34 @@
+spring:
+  batch:
+    job:
+      enabled: true
+    jdbc:
+      initialize-schema: always
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=false
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema-contracts.sql
+
+batch:
+  injector:
+    input-file: classpath:input/contracts_input.txt
+    output-file: target/test_contracts_output.txt
+    chunk-size: 10
+    separator: ";"
+    root-record-type: "CTR"
+    skip-limit: 100
+    # H2 does not support ON CONFLICT; use MERGE INTO instead.
+    contract-upsert-sql: >-
+      MERGE INTO contract (contract_id, client_id, start_date, status, line_count)
+      KEY (contract_id)
+      VALUES (?, ?, ?, ?, ?)
+
+logging:
+  level:
+    org.springframework.batch: WARN
+    com.example.mdv02batch: INFO

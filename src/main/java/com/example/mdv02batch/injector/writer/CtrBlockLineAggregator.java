@@ -1,6 +1,6 @@
 package com.example.mdv02batch.injector.writer;
 
-import java.util.stream.Collectors;
+import java.util.List;
 
 import com.example.mdv02batch.injector.dto.BusinessDataLine;
 import com.example.mdv02batch.injector.dto.CtrBlock;
@@ -18,9 +18,9 @@ import org.springframework.util.Assert;
  * {@code LineAggregator<BusinessDataLine>} — {@link InjectorLineAggregator} by
  * default — and the results are joined with the block line separator.</p>
  *
- * <p>The writer appends its own line separator after each item, so the
- * separator used here must not be appended after the last line of the block,
- * otherwise every block would be followed by a blank line.</p>
+ * <p>Uses a {@code StringBuilder} instead of {@code Collectors.joining()} to
+ * avoid intermediate {@code String[]} and {@code StringJoiner} allocations on
+ * each of the millions of aggregations.</p>
  */
 public class CtrBlockLineAggregator implements LineAggregator<CtrBlock> {
 
@@ -43,8 +43,15 @@ public class CtrBlockLineAggregator implements LineAggregator<CtrBlock> {
     @Override
     public String aggregate(CtrBlock item) {
         Assert.notNull(item, "item must not be null");
-        return item.lines().stream()
-                .map(this.lineAggregator::aggregate)
-                .collect(Collectors.joining(this.lineSeparator));
+        List<BusinessDataLine> lines = item.lines();
+        StringBuilder sb = new StringBuilder(lines.size() * 64);
+        for (int i = 0; i < lines.size(); i++) {
+            if (i > 0) {
+                sb.append(this.lineSeparator);
+            }
+            sb.append(this.lineAggregator.aggregate(lines.get(i)));
+        }
+        return sb.toString();
     }
 }
+

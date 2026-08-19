@@ -1,13 +1,19 @@
 package com.example.mdv02batch.injector;
 
 import java.time.Duration;
+import java.util.List;
+
+import javax.sql.DataSource;
 
 import com.example.mdv02batch.injector.dto.BusinessDataLine;
+import com.example.mdv02batch.injector.dto.ContractEntity;
 import com.example.mdv02batch.injector.dto.CtrBlock;
+import com.example.mdv02batch.injector.listener.CtrBlockSkipListener;
 import com.example.mdv02batch.injector.processor.CtrBlockItemProcessor;
 import com.example.mdv02batch.injector.reader.CtrBlockItemReader;
 import com.example.mdv02batch.injector.reader.InjectorBusinessDataLineMapper;
 import com.example.mdv02batch.injector.writer.CtrBlockLineAggregator;
+import com.example.mdv02batch.injector.writer.CtrBlockToContractEntityConverter;
 import com.example.mdv02batch.injector.writer.InjectorLineAggregator;
 
 import org.slf4j.Logger;
@@ -21,12 +27,16 @@ import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.StepExecutionListener;
 import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.builder.JobBuilder;
+import org.springframework.batch.core.launch.support.RunIdIncrementer;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
+import org.springframework.batch.item.database.JdbcBatchItemWriter;
+import org.springframework.batch.item.database.builder.JdbcBatchItemWriterBuilder;
 import org.springframework.batch.item.file.FlatFileItemReader;
 import org.springframework.batch.item.file.FlatFileItemWriter;
 import org.springframework.batch.item.file.builder.FlatFileItemReaderBuilder;
 import org.springframework.batch.item.file.builder.FlatFileItemWriterBuilder;
+import org.springframework.batch.item.support.CompositeItemWriter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -39,7 +49,7 @@ public class JobInjector {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JobInjector.class);
 
-    @Value("${batch.injector.chunk-size:1000}")
+    @Value("${batch.injector.chunk-size:500}")
     private int chunkSize;
 
     @Value("${batch.injector.separator:;}")
@@ -48,9 +58,13 @@ public class JobInjector {
     @Value("${batch.injector.root-record-type:CTR}")
     private String rootRecordType;
 
+    @Value("${batch.injector.skip-limit:50000}")
+    private int skipLimit;
+
     @Bean
     public Job injectorJob(JobRepository jobRepository, Step injectorStep) {
         return new JobBuilder("injectorJob", jobRepository)
+                .incrementer(new RunIdIncrementer())
                 .listener(jobExecutionListener())
                 .start(injectorStep)
                 .build();
@@ -59,19 +73,31 @@ public class JobInjector {
     /**
      * The item of the step is a CTR block, no longer a physical line: one chunk
      * therefore commits a whole number of contracts, never a truncated one.
+     *
+     * <p>Writer is a {@link CompositeItemWriter} that delegates to both a file
+     * writer and a JDBC database writer.</p>
+     *
+     * <p>Fault tolerance is enabled so that any bad contract block (e.g. database
+     * formatting error or exception during writing/processing) is skipped up to
+     * {@code skipLimit} without stopping the batch process.</p>
      */
     @Bean
     public Step injectorStep(JobRepository jobRepository,
                              PlatformTransactionManager transactionManager,
                              CtrBlockItemReader injectorBlockReader,
                              CtrBlockItemProcessor injectorProcessor,
-                             FlatFileItemWriter<CtrBlock> injectorWriter) {
+                             CompositeItemWriter<CtrBlock> injectorCompositeWriter,
+                             CtrBlockSkipListener skipListener) {
         return new StepBuilder("injectorStep", jobRepository)
                 .<CtrBlock, CtrBlock>chunk(chunkSize, transactionManager)
-                .listener(stepExecutionListener())
                 .reader(injectorBlockReader)
                 .processor(injectorProcessor)
-                .writer(injectorWriter)
+                .writer(injectorCompositeWriter)
+                .faultTolerant()
+                .skip(Exception.class)
+                .skipLimit(skipLimit)
+                .listener(skipListener)
+                .listener(stepExecutionListener())
                 .build();
     }
 
@@ -108,11 +134,11 @@ public class JobInjector {
      */
     @Bean
     @StepScope
-    public FlatFileItemWriter<CtrBlock> injectorWriter(
+    public FlatFileItemWriter<CtrBlock> injectorFileWriter(
             @Value("#{jobParameters['outputFile'] ?: '${batch.injector.output-file}'}") String outputFile) {
-        LOGGER.info("Configuring injectorWriter with outputFile={}", outputFile);
+        LOGGER.info("Configuring injectorFileWriter with outputFile={}", outputFile);
         return new FlatFileItemWriterBuilder<CtrBlock>()
-                .name("injectorWriter")
+                .name("injectorFileWriter")
                 .resource(new FileSystemResource(outputFile))
                 .encoding("UTF-8")
                 .shouldDeleteIfExists(true)
@@ -120,6 +146,53 @@ public class JobInjector {
                 .lineAggregator(new CtrBlockLineAggregator(
                         new InjectorLineAggregator(), System.lineSeparator()))
                 .build();
+    }
+
+    /**
+     * Persists each contract (CTR header) to the {@code contract} table.
+     *
+     * <p>The SQL is externalised in {@code application.yml} under
+     * {@code batch.injector.contract-upsert-sql} so it can be overridden
+     * per profile: PostgreSQL uses {@code ON CONFLICT}, H2 (tests) uses
+     * {@code MERGE INTO}.</p>
+     *
+     * <p>By the time a block reaches this writer the processor has already
+     * filtered out orphan blocks and blocks with a missing contract ID,
+     * so {@link CtrBlockToContractEntityConverter#convert} is guaranteed
+     * to return a non-null entity.</p>
+     */
+    @Bean
+    public JdbcBatchItemWriter<CtrBlock> injectorDbWriter(
+            DataSource dataSource,
+            @Value("${batch.injector.contract-upsert-sql}") String upsertSql) {
+        LOGGER.info("Configuring injectorDbWriter for contract table");
+        return new JdbcBatchItemWriterBuilder<CtrBlock>()
+                .dataSource(dataSource)
+                .sql(upsertSql)
+                .itemPreparedStatementSetter((item, ps) -> {
+                    ContractEntity entity = CtrBlockToContractEntityConverter.convert(item);
+                    ps.setString(1, entity.getContractId());
+                    ps.setString(2, entity.getClientId());
+                    ps.setString(3, entity.getStartDate());
+                    ps.setString(4, entity.getStatus());
+                    ps.setInt(5, entity.getLineCount());
+                })
+                .build();
+    }
+
+    /**
+     * Composite writer: delegates to both the file writer and the DB writer
+     * in a single transaction per chunk.
+     */
+    @Bean
+    @StepScope
+    public CompositeItemWriter<CtrBlock> injectorCompositeWriter(
+            FlatFileItemWriter<CtrBlock> injectorFileWriter,
+            JdbcBatchItemWriter<CtrBlock> injectorDbWriter) {
+        LOGGER.info("Configuring injectorCompositeWriter (file + database)");
+        CompositeItemWriter<CtrBlock> compositeWriter = new CompositeItemWriter<>();
+        compositeWriter.setDelegates(List.of(injectorFileWriter, injectorDbWriter));
+        return compositeWriter;
     }
 
     @Bean
@@ -176,3 +249,4 @@ public class JobInjector {
         };
     }
 }
+
