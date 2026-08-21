@@ -13,7 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.parameters.JobParametersBuilder;
-import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.core.step.StepExecution;
 import org.springframework.batch.test.context.SpringBatchTest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class InjectorJobIntegrationTest {
 
     @Autowired
-    private JobLauncher jobLauncher;
+    private JobOperator jobOperator;
 
     @Autowired
     @Qualifier("injectorJob")
@@ -51,7 +51,7 @@ class InjectorJobIntegrationTest {
                 .addString("outputFile", outputFile.toString(), false)
                 .toJobParameters();
 
-        var execution = this.jobLauncher.run(this.injectorJob, params);
+        var execution = this.jobOperator.start(this.injectorJob, params);
 
         assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);
         assertThat(outputFile).exists();
@@ -69,7 +69,7 @@ class InjectorJobIntegrationTest {
 
         List<String> inputLines = readInputLines();
 
-        this.jobLauncher.run(this.injectorJob, params);
+        this.jobOperator.start(this.injectorJob, params);
 
         List<String> outputLines = Files.readAllLines(outputFile)
                 .stream()
@@ -96,7 +96,7 @@ class InjectorJobIntegrationTest {
         List<String> inputLines = readInputLines();
         long expectedBlocks = inputLines.stream().filter(line -> line.startsWith("CTR;")).count();
 
-        var execution = this.jobLauncher.run(this.injectorJob, params);
+        var execution = this.jobOperator.start(this.injectorJob, params);
         StepExecution stepExecution = execution.getStepExecutions().iterator().next();
 
         assertThat(expectedBlocks).isGreaterThan(0);
