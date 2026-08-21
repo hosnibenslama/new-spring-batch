@@ -49,17 +49,21 @@ public class JobInjector {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JobInjector.class);
 
-    @Value("${batch.injector.chunk-size:500}")
-    private int chunkSize;
+    private final int chunkSize;
+    private final String separator;
+    private final String rootRecordType;
+    private final int skipLimit;
 
-    @Value("${batch.injector.separator:;}")
-    private String separator;
-
-    @Value("${batch.injector.root-record-type:CTR}")
-    private String rootRecordType;
-
-    @Value("${batch.injector.skip-limit:50000}")
-    private int skipLimit;
+    public JobInjector(
+            @Value("${batch.injector.chunk-size:500}") int chunkSize,
+            @Value("${batch.injector.separator:;}") String separator,
+            @Value("${batch.injector.root-record-type:CTR}") String rootRecordType,
+            @Value("${batch.injector.skip-limit:50000}") int skipLimit) {
+        this.chunkSize = chunkSize;
+        this.separator = separator;
+        this.rootRecordType = rootRecordType;
+        this.skipLimit = skipLimit;
+    }
 
     @Bean
     public Job injectorJob(JobRepository jobRepository, Step injectorStep) {

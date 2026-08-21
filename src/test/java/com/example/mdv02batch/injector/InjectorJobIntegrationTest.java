@@ -30,12 +30,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class InjectorJobIntegrationTest {
 
-    @Autowired
-    private JobOperator jobOperator;
+    private final JobOperator jobOperator;
+    private final Job injectorJob;
 
     @Autowired
-    @Qualifier("injectorJob")
-    private Job injectorJob;
+    public InjectorJobIntegrationTest(
+            JobOperator jobOperator,
+            @Qualifier("injectorJob") Job injectorJob) {
+        this.jobOperator = jobOperator;
+        this.injectorJob = injectorJob;
+    }
 
     @TempDir
     Path tempDir;
