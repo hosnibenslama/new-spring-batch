@@ -4,7 +4,7 @@ import com.example.mdv02batch.injector.dto.CtrBlock;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.batch.core.SkipListener;
+import org.springframework.batch.core.listener.SkipListener;
 import org.springframework.stereotype.Component;
 
 /**

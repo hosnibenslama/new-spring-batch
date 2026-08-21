@@ -6,7 +6,8 @@ import com.example.mdv02batch.injector.dto.CtrBlock;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.batch.item.ItemProcessor;
+import org.springframework.batch.core.configuration.annotation.StepScope;
+import org.springframework.batch.infrastructure.item.ItemProcessor;
 import org.springframework.stereotype.Component;
 
 /**
@@ -22,6 +23,7 @@ import org.springframework.stereotype.Component;
  * Business compliance checks should be added here and should return
  * {@code null} or throw a skippable exception for non-compliant blocks.</p>
  */
+@StepScope
 @Component
 public class CtrBlockItemProcessor implements ItemProcessor<CtrBlock, CtrBlock> {
 
@@ -54,4 +56,3 @@ public class CtrBlockItemProcessor implements ItemProcessor<CtrBlock, CtrBlock> 
         return item;
     }
 }
-

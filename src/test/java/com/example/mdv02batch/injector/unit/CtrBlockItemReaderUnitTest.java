@@ -8,8 +8,8 @@ import com.example.mdv02batch.injector.dto.CtrBlock;
 import com.example.mdv02batch.injector.reader.CtrBlockItemReader;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.item.support.ListItemReader;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
+import org.springframework.batch.infrastructure.item.support.ListItemReader;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

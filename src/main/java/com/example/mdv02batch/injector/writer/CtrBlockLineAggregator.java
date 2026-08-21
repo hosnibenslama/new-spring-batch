@@ -5,7 +5,7 @@ import java.util.List;
 import com.example.mdv02batch.injector.dto.BusinessDataLine;
 import com.example.mdv02batch.injector.dto.CtrBlock;
 
-import org.springframework.batch.item.file.transform.LineAggregator;
+import org.springframework.batch.infrastructure.item.file.transform.LineAggregator;
 import org.springframework.util.Assert;
 
 /**
@@ -54,4 +54,3 @@ public class CtrBlockLineAggregator implements LineAggregator<CtrBlock> {
         return sb.toString();
     }
 }
-

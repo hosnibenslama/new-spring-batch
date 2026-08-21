@@ -6,11 +6,11 @@ import java.util.List;
 import com.example.mdv02batch.injector.dto.BusinessDataLine;
 import com.example.mdv02batch.injector.dto.CtrBlock;
 
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.item.ItemReader;
-import org.springframework.batch.item.ItemStreamException;
-import org.springframework.batch.item.ItemStreamReader;
-import org.springframework.batch.item.support.SingleItemPeekableItemReader;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
+import org.springframework.batch.infrastructure.item.ItemReader;
+import org.springframework.batch.infrastructure.item.ItemStreamException;
+import org.springframework.batch.infrastructure.item.ItemStreamReader;
+import org.springframework.batch.infrastructure.item.support.SingleItemPeekableItemReader;
 import org.springframework.util.Assert;
 
 /**
@@ -42,9 +42,7 @@ public class CtrBlockItemReader implements ItemStreamReader<CtrBlock> {
     public CtrBlockItemReader(ItemReader<BusinessDataLine> lineReader, String rootRecordType) {
         Assert.notNull(lineReader, "lineReader must not be null");
         Assert.hasText(rootRecordType, "rootRecordType must not be empty");
-        SingleItemPeekableItemReader<BusinessDataLine> peekable = new SingleItemPeekableItemReader<>();
-        peekable.setDelegate(lineReader);
-        this.delegate = peekable;
+        this.delegate = new SingleItemPeekableItemReader<>(lineReader);
         this.rootRecordType = rootRecordType;
     }
 

@@ -19,24 +19,24 @@ import com.example.mdv02batch.injector.writer.InjectorLineAggregator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.BatchStatus;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.JobExecution;
-import org.springframework.batch.core.JobExecutionListener;
-import org.springframework.batch.core.Step;
-import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.core.StepExecutionListener;
+import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.configuration.annotation.StepScope;
+import org.springframework.batch.core.job.Job;
+import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.builder.JobBuilder;
-import org.springframework.batch.core.launch.support.RunIdIncrementer;
+import org.springframework.batch.core.listener.JobExecutionListener;
+import org.springframework.batch.core.listener.StepExecutionListener;
 import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.step.Step;
+import org.springframework.batch.core.step.StepExecution;
 import org.springframework.batch.core.step.builder.StepBuilder;
-import org.springframework.batch.item.database.JdbcBatchItemWriter;
-import org.springframework.batch.item.database.builder.JdbcBatchItemWriterBuilder;
-import org.springframework.batch.item.file.FlatFileItemReader;
-import org.springframework.batch.item.file.FlatFileItemWriter;
-import org.springframework.batch.item.file.builder.FlatFileItemReaderBuilder;
-import org.springframework.batch.item.file.builder.FlatFileItemWriterBuilder;
-import org.springframework.batch.item.support.CompositeItemWriter;
+import org.springframework.batch.infrastructure.item.database.JdbcBatchItemWriter;
+import org.springframework.batch.infrastructure.item.database.builder.JdbcBatchItemWriterBuilder;
+import org.springframework.batch.infrastructure.item.file.FlatFileItemReader;
+import org.springframework.batch.infrastructure.item.file.FlatFileItemWriter;
+import org.springframework.batch.infrastructure.item.file.builder.FlatFileItemReaderBuilder;
+import org.springframework.batch.infrastructure.item.file.builder.FlatFileItemWriterBuilder;
+import org.springframework.batch.infrastructure.item.support.CompositeItemWriter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -64,7 +64,6 @@ public class JobInjector {
     @Bean
     public Job injectorJob(JobRepository jobRepository, Step injectorStep) {
         return new JobBuilder("injectorJob", jobRepository)
-                .incrementer(new RunIdIncrementer())
                 .listener(jobExecutionListener())
                 .start(injectorStep)
                 .build();
@@ -89,7 +88,8 @@ public class JobInjector {
                              CompositeItemWriter<CtrBlock> injectorCompositeWriter,
                              CtrBlockSkipListener skipListener) {
         return new StepBuilder("injectorStep", jobRepository)
-                .<CtrBlock, CtrBlock>chunk(chunkSize, transactionManager)
+                .<CtrBlock, CtrBlock>chunk(chunkSize)
+                .transactionManager(transactionManager)
                 .reader(injectorBlockReader)
                 .processor(injectorProcessor)
                 .writer(injectorCompositeWriter)
@@ -171,11 +171,11 @@ public class JobInjector {
                 .sql(upsertSql)
                 .itemPreparedStatementSetter((item, ps) -> {
                     ContractEntity entity = CtrBlockToContractEntityConverter.convert(item);
-                    ps.setString(1, entity.getContractId());
-                    ps.setString(2, entity.getClientId());
-                    ps.setString(3, entity.getStartDate());
-                    ps.setString(4, entity.getStatus());
-                    ps.setInt(5, entity.getLineCount());
+                    ps.setString(1, entity.contractId());
+                    ps.setString(2, entity.clientId());
+                    ps.setString(3, entity.startDate());
+                    ps.setString(4, entity.status());
+                    ps.setInt(5, entity.lineCount());
                 })
                 .build();
     }
@@ -197,56 +197,65 @@ public class JobInjector {
 
     @Bean
     public JobExecutionListener jobExecutionListener() {
-        return new JobExecutionListener() {
-            @Override
-            public void beforeJob(JobExecution jobExecution) {
-                LOGGER.info("Job {} is starting with parameters: {}",
-                        jobExecution.getJobInstance().getJobName(),
-                        jobExecution.getJobParameters());
-            }
-
-            @Override
-            public void afterJob(JobExecution jobExecution) {
-                long durationMs = 0L;
-                if (jobExecution.getStartTime() != null && jobExecution.getEndTime() != null) {
-                    durationMs = Duration.between(jobExecution.getStartTime(), jobExecution.getEndTime()).toMillis();
-                }
-
-                if (jobExecution.getStatus() == BatchStatus.COMPLETED) {
-                    LOGGER.info("Job {} completed successfully in {} ms with status {}",
-                            jobExecution.getJobInstance().getJobName(),
-                            durationMs,
-                            jobExecution.getStatus());
-                } else {
-                    LOGGER.warn("Job {} finished with status {} in {} ms",
-                            jobExecution.getJobInstance().getJobName(),
-                            jobExecution.getStatus(),
-                            durationMs);
-                }
-            }
-        };
+        return new InjectorJobExecutionListener();
     }
 
     @Bean
     public StepExecutionListener stepExecutionListener() {
-        return new StepExecutionListener() {
-            @Override
-            public void beforeStep(StepExecution stepExecution) {
-                LOGGER.info("Step {} is starting", stepExecution.getStepName());
-            }
+        return new InjectorStepExecutionListener();
+    }
 
-            @Override
-            public org.springframework.batch.core.ExitStatus afterStep(StepExecution stepExecution) {
-                LOGGER.info("Step {} completed with status {} | blocksRead={} | blocksWritten={} | filterCount={} | skipCount={}",
-                        stepExecution.getStepName(),
-                        stepExecution.getStatus(),
-                        stepExecution.getReadCount(),
-                        stepExecution.getWriteCount(),
-                        stepExecution.getFilterCount(),
-                        stepExecution.getSkipCount());
-                return stepExecution.getExitStatus();
+    // -------------------------------------------------------------------------
+    // Private named listeners — avoids anonymous-class bytecode overhead and
+    // keeps each listener's logic isolated and independently testable.
+    // -------------------------------------------------------------------------
+
+    private static final class InjectorJobExecutionListener implements JobExecutionListener {
+
+        @Override
+        public void beforeJob(JobExecution jobExecution) {
+            LOGGER.info("Job {} is starting with parameters: {}",
+                    jobExecution.getJobInstance().getJobName(),
+                    jobExecution.getJobParameters());
+        }
+
+        @Override
+        public void afterJob(JobExecution jobExecution) {
+            long durationMs = 0L;
+            if (jobExecution.getStartTime() != null && jobExecution.getEndTime() != null) {
+                durationMs = Duration.between(jobExecution.getStartTime(), jobExecution.getEndTime()).toMillis();
             }
-        };
+            if (jobExecution.getStatus() == BatchStatus.COMPLETED) {
+                LOGGER.info("Job {} completed successfully in {} ms with status {}",
+                        jobExecution.getJobInstance().getJobName(),
+                        durationMs,
+                        jobExecution.getStatus());
+            } else {
+                LOGGER.warn("Job {} finished with status {} in {} ms",
+                        jobExecution.getJobInstance().getJobName(),
+                        jobExecution.getStatus(),
+                        durationMs);
+            }
+        }
+    }
+
+    private static final class InjectorStepExecutionListener implements StepExecutionListener {
+
+        @Override
+        public void beforeStep(StepExecution stepExecution) {
+            LOGGER.info("Step {} is starting", stepExecution.getStepName());
+        }
+
+        @Override
+        public ExitStatus afterStep(StepExecution stepExecution) {
+            LOGGER.info("Step {} completed with status {} | blocksRead={} | blocksWritten={} | filterCount={} | skipCount={}",
+                    stepExecution.getStepName(),
+                    stepExecution.getStatus(),
+                    stepExecution.getReadCount(),
+                    stepExecution.getWriteCount(),
+                    stepExecution.getFilterCount(),
+                    stepExecution.getSkipCount());
+            return stepExecution.getExitStatus();
+        }
     }
 }
-

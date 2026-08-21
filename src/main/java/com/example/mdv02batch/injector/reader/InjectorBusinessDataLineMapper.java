@@ -1,7 +1,7 @@
 package com.example.mdv02batch.injector.reader;
 
 import com.example.mdv02batch.injector.dto.BusinessDataLine;
-import org.springframework.batch.item.file.LineMapper;
+import org.springframework.batch.infrastructure.item.file.LineMapper;
 
 import java.util.ArrayList;
 import java.util.List;

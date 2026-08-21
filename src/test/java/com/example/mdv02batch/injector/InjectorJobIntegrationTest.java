@@ -11,14 +11,15 @@ import com.example.mdv02batch.injector.reader.InjectorBusinessDataLineMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.batch.core.BatchStatus;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.JobParametersBuilder;
-import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.job.Job;
+import org.springframework.batch.core.job.parameters.JobParametersBuilder;
 import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.step.StepExecution;
 import org.springframework.batch.test.context.SpringBatchTest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBatchTest
 @SpringBootTest
 @ActiveProfiles("test")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class InjectorJobIntegrationTest {
 
     @Autowired
@@ -42,10 +44,11 @@ class InjectorJobIntegrationTest {
     void shouldCompleteSuccessfully() throws Exception {
         Path outputFile = this.tempDir.resolve("contracts_output.txt");
 
+        // Spring Batch 6: addString defaults to identifying=false; pass true explicitly.
         var params = new JobParametersBuilder()
-                .addString("runDate", LocalDateTime.now().toString())
-                .addString("inputFile", "classpath:input/contracts_input.txt")
-                .addString("outputFile", outputFile.toString())
+                .addString("runDate", LocalDateTime.now() + "_test1", true)
+                .addString("inputFile", "classpath:input/contracts_input.txt", false)
+                .addString("outputFile", outputFile.toString(), false)
                 .toJobParameters();
 
         var execution = this.jobLauncher.run(this.injectorJob, params);
@@ -59,9 +62,9 @@ class InjectorJobIntegrationTest {
         Path outputFile = this.tempDir.resolve("contracts_output_ca6.txt");
 
         var params = new JobParametersBuilder()
-                .addString("runDate", LocalDateTime.now() + "_ac6")
-                .addString("inputFile", "classpath:input/contracts_input.txt")
-                .addString("outputFile", outputFile.toString())
+                .addString("runDate", LocalDateTime.now() + "_test2", true)
+                .addString("inputFile", "classpath:input/contracts_input.txt", false)
+                .addString("outputFile", outputFile.toString(), false)
                 .toJobParameters();
 
         List<String> inputLines = readInputLines();
@@ -85,9 +88,9 @@ class InjectorJobIntegrationTest {
         Path outputFile = this.tempDir.resolve("contracts_output_blocks.txt");
 
         var params = new JobParametersBuilder()
-                .addString("runDate", LocalDateTime.now() + "_blocks")
-                .addString("inputFile", "classpath:input/contracts_input.txt")
-                .addString("outputFile", outputFile.toString())
+                .addString("runDate", LocalDateTime.now() + "_test3", true)
+                .addString("inputFile", "classpath:input/contracts_input.txt", false)
+                .addString("outputFile", outputFile.toString(), false)
                 .toJobParameters();
 
         List<String> inputLines = readInputLines();

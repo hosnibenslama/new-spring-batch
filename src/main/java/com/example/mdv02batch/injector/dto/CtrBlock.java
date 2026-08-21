@@ -78,7 +78,9 @@ public record CtrBlock(
     }
 
     public Optional<BusinessDataLine> firstOfType(String recordType) {
-        return linesOfType(recordType).stream().findFirst();
+        return lines().stream()
+                .filter(line -> recordType.equals(line.recordType()))
+                .findFirst();
     }
 
     /** Short label for logs and future rejection files. */

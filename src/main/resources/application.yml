@@ -1,7 +1,7 @@
 spring:
   batch:
     job:
-      enabled: true
+      name: injectorJob
     jdbc:
       initialize-schema: always
   datasource:
