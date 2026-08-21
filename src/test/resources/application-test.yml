@@ -18,7 +18,7 @@ batch:
   injector:
     input-file: classpath:input/contracts_input.txt
     output-file: target/test_contracts_output.txt
-    chunk-size: 10
+    chunk-size: 1000
     separator: ";"
     root-record-type: "CTR"
     skip-limit: 100
